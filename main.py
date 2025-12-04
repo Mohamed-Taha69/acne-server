@@ -10,6 +10,7 @@ import ast
 from dotenv import load_dotenv
 
 # تحميل متغيرات البيئة من ملف .env
+# تأكد أن ملف .env يحتوي على SUPABASE_KEY (service_role)
 load_dotenv()
 
 app = FastAPI()
@@ -34,73 +35,83 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("⚠️ Supabase keys are missing! Check .env file.")
 
+# إنشاء عميل Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-hf_client = GradioClient("m-taha6/acne-detection-api")
+
+# ✅ الربط مع موديل Monkeypox الجديد
+hf_client = GradioClient("m-taha6/monkeypox")
 
 # ---------------------------------------------------------
-# 3. قاعدة البيانات الطبية الثابتة (Medical Knowledge Base) 🏥
+# 3. قاعدة البيانات الطبية (Medical Knowledge Base)
 # ---------------------------------------------------------
 MEDICAL_REPORT_DATA = {
-    "Mild": {
-        "assessment": "The skin shows signs of Mild Acne. This is characterized by whiteheads and blackheads. Inflammation is generally low.",
+    "Monkeypox": {
+        "assessment": "The analysis indicates signs consistent with Monkeypox. Lesions typically progress from macules to papules, vesicles, pustules, and then scabs.",
         "key_features": [
-            "Presence of comedones",
-            "Minimal inflammation",
-            "No painful nodules"
+            "Deep-seated, firm/hard lesions",
+            "Well-defined borders with central umbilication",
+            "Lesions often start on the face/mouth and spread",
+            "Swollen lymph nodes (lymphadenopathy)"
         ],
         "recommendations": [
-            "Wash face twice a day with a gentle cleanser.",
-            "Avoid scrubbing your skin harshly.",
-            "Use non-comedogenic skincare products."
+            "Isolate immediately to prevent spread.",
+            "Wear a mask and cover lesions.",
+            "Consult a healthcare provider for PCR testing.",
+            "Monitor for fever and other systemic symptoms."
         ]
     },
-    "Moderate": {
-        "assessment": "The analysis indicates Moderate Acne. Papules (red bumps) and pustules are visible. There is noticeable redness.",
+    "Chickenpox": {
+        "assessment": "The skin shows signs characteristic of Chickenpox (Varicella). This usually presents as an itchy, blister-like rash.",
         "key_features": [
-            "Visible red papules",
-            "Pustules with white centers",
-            "Moderate redness"
+            "Rash appears in crops (different stages visible)",
+            "Superficial dew-drop on a rose petal appearance",
+            "Intense itching",
+            "Usually starts on the trunk and spreads"
         ],
         "recommendations": [
-            "Consider over-the-counter benzoyl peroxide.",
-            "Don't pop or squeeze pimples.",
-            "Consult a pharmacist."
+            "Stay at home until all blisters have crusted over.",
+            "Use calamine lotion to soothe itching.",
+            "Avoid scratching to prevent secondary infection.",
+            "Avoid contact with pregnant women or immunocompromised individuals."
         ]
     },
-    "Severe": {
-        "assessment": "The image displays symptoms consistent with Severe Acne. Numerous inflamed papules and pustules are present. Risk of scarring is higher.",
+    "Measles": {
+        "assessment": "The analysis suggests Measles. This is a highly contagious viral infection appearing as a flat, red rash.",
         "key_features": [
-            "Numerous inflamed papules",
-            "Significant redness and swelling",
-            "Potential for deep-seated nodules"
+            "Flat red rash starting at hairline/face",
+            "Spreads downwards to neck, trunk, and limbs",
+            "Associated with high fever, cough, and runny nose",
+            "Tiny white spots inside the mouth (Koplik spots)"
         ],
         "recommendations": [
-            "Consult a dermatologist immediately.",
-            "Prescription medication may be needed.",
-            "Avoid all skin irritants."
+            "Seek medical attention immediately (highly contagious).",
+            "Isolate from others, especially unvaccinated individuals.",
+            "Rest and maintain hydration.",
+            "Vitamin A supplements may be prescribed by a doctor."
         ]
     },
-    "Very_Severe": {
-        "assessment": "Diagnosis indicates Very Severe (Cystic) Acne. Large, painful cysts are present deep under the skin.",
+    "Normal": {
+        "assessment": "The skin appears healthy with no signs of pathological rashes related to Monkeypox, Chickenpox, or Measles.",
         "key_features": [
-            "Large, painful cysts and nodules",
-            "Widespread inflammation",
-            "High risk of permanent scarring"
+            "Clear skin texture",
+            "No suspicious lesions or blisters",
+            "Normal pigmentation"
         ],
         "recommendations": [
-            "Urgent dermatologist care is required.",
-            "Systemic treatment is likely necessary.",
-            "Do not attempt to treat at home."
+            "Continue regular skin hygiene routine.",
+            "Use sunscreen when exposed to the sun.",
+            "Perform regular self-checks for any changes.",
+            "Stay hydrated to maintain skin health."
         ]
     }
 }
 
 @app.get("/")
 def home():
-    return {"message": "Acne Detection API is Running with Medical Report System!"}
+    return {"message": "Skin Disease Classification API is Running!"}
 
 # =========================================================
-# 4. الـ Scan Endpoint (مع التقرير الطبي)
+# 4. الـ Scan Endpoint
 # =========================================================
 @app.post("/scan")
 async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
@@ -113,46 +124,56 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
 
         # ب) إرسال الصورة للموديل
         print("🤖 Analyzing Image...")
+        
+        # استخدام api_name="/predict"
         result = hf_client.predict(
             image=handle_file(temp_filename),
-            api_name="/predict_acne"
+            api_name="/predict" 
         )
         
-        # ج) تنظيف النتيجة لاستخراج الدرجة فقط
-        predicted_grade = str(result)
+        # ج) استخراج النتيجة (التشخيص)
+        predicted_diagnosis = str(result)
         confidence = 0.95 
 
         try:
+            # محاولة استخراج الليبل لو النتيجة JSON
             if isinstance(result, dict) and 'label' in result:
-                predicted_grade = result['label']
+                predicted_diagnosis = result['label']
             elif isinstance(result, str) and "{'label':" in result:
                 res_dict = ast.literal_eval(result)
-                predicted_grade = res_dict['label']
+                predicted_diagnosis = res_dict['label']
         except:
-            pass # Keep it as string if parsing fails
+            pass 
             
-        print(f"✅ Grade Detected: {predicted_grade}")
+        print(f"✅ Diagnosis Detected: {predicted_diagnosis}")
 
-        # د) جلب التقرير الطبي من القاموس
-        report_data = MEDICAL_REPORT_DATA.get(predicted_grade, MEDICAL_REPORT_DATA["Mild"])
+        # د) جلب التقرير الطبي المناسب
+        report_data = MEDICAL_REPORT_DATA.get(predicted_diagnosis, {
+            "assessment": "Analysis completed. Diagnosis not specifically listed.",
+            "key_features": [],
+            "recommendations": ["Consult a doctor for further checkup."]
+        })
 
-        # هـ) رفع الصورة لـ Supabase
-        print("☁️ Uploading Image...")
+        # هـ) رفع الصورة لـ Supabase (البوكت الجديد)
+        BUCKET_NAME = "skin-diseases"  # ✅ الاسم الجديد الذي أنشأته
+        
+        print(f"☁️ Uploading Image to {BUCKET_NAME}...")
         with open(temp_filename, "rb") as f:
             file_content = f.read()
         
         file_path = f"{user_id}/{file.filename}"
-        supabase.storage.from_("acne-images").upload(file_path, file_content, {"upsert": "true"})
-        public_url = supabase.storage.from_("acne-images").get_public_url(file_path)
+        
+        # الرفع (service_role key في .env سيسمح بذلك حتى مع القيود)
+        supabase.storage.from_(BUCKET_NAME).upload(file_path, file_content, {"upsert": "true"})
+        public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
 
-        # و) حفظ البيانات في الهيستوري
+        # و) حفظ البيانات في الهيستوري (باستخدام العمود الجديد diagnosis)
         print("💾 Saving to History...")
         data = {
             "user_id": user_id,
             "image_url": public_url,
-            "acne_grade": predicted_grade,
+            "diagnosis": predicted_diagnosis, # ✅ العمود الجديد في الداتابيز
             "confidence": float(confidence),
-            # بنحول التقرير لنص عشان يتحفظ في عمود text في الداتابيز
             "medical_advice": json.dumps(report_data) 
         }
         
@@ -161,15 +182,16 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         # ز) تنظيف الملف المؤقت
         os.remove(temp_filename)
 
-        # الرد النهائي للفرونت اند
+        # الرد النهائي
         return {
             "status": "success",
-            "grade": predicted_grade,
+            "diagnosis": predicted_diagnosis,
             "image_url": public_url,
             "report": report_data 
         }
 
     except Exception as e:
+        # تنظيف في حالة الخطأ
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
         return {"status": "error", "message": str(e)}
@@ -215,11 +237,12 @@ def update_profile(profile: ProfileUpdate):
 @app.get("/history/{user_id}")
 def get_user_history(user_id: str):
     try:
+        # ترتيب النتائج من الأحدث للأقدم
         response = supabase.table("scan_history").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
         
-        # تحويل النص المحفوظ في medical_advice لـ JSON مرة تانية عشان الفرونت اند يفهمه
         final_data = []
         for item in response.data:
+            # تحويل النص لـ JSON في حالة medical_advice
             if item.get("medical_advice"):
                 try:
                     item["medical_advice"] = json.loads(item["medical_advice"])
