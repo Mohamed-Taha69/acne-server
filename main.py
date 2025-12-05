@@ -3,15 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from gradio_client import Client as GradioClient, handle_file
 from pydantic import BaseModel
-from typing import Optional  # ✅ تمت إضافتها للتعامل مع الحقول الاختيارية
+from typing import Optional
 import shutil
 import os
 import json
 import ast
 from dotenv import load_dotenv
 
-# تحميل متغيرات البيئة من ملف .env
-# تأكد أن ملف .env يحتوي على SUPABASE_KEY (service_role)
+# تحميل متغيرات البيئة
 load_dotenv()
 
 app = FastAPI()
@@ -28,7 +27,7 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------
-# 2. الإعدادات (من ملف .env)
+# 2. إعدادات Supabase
 # ---------------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -36,14 +35,26 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("⚠️ Supabase keys are missing! Check .env file.")
 
-# إنشاء عميل Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ الربط مع موديل Monkeypox الجديد
-hf_client = GradioClient("m-taha6/monkeypox")
+# ---------------------------------------------------------
+# 3. إعدادات الموديل (Lazy Loading + Singleton Pattern) 🚀
+# ---------------------------------------------------------
+# متغير لتخزين الاتصال حتى لا نعيد الاتصال كل مرة
+_model_client_instance = None
+
+def get_model_client():
+    global _model_client_instance
+    # لو الاتصال غير موجود، قم بإنشائه (يحدث مرة واحدة فقط)
+    if _model_client_instance is None:
+        print("🔌 Connecting to Hugging Face Model (First Time)...")
+        _model_client_instance = GradioClient("m-taha6/monkeypox")
+        print("✅ Connected Successfully to Hugging Face!")
+    
+    return _model_client_instance
 
 # ---------------------------------------------------------
-# 3. قاعدة البيانات الطبية (Medical Knowledge Base)
+# 4. قاعدة البيانات الطبية (Medical Knowledge Base)
 # ---------------------------------------------------------
 MEDICAL_REPORT_DATA = {
     "Monkeypox": {
@@ -112,7 +123,7 @@ def home():
     return {"message": "Skin Disease Classification API is Running!"}
 
 # =========================================================
-# 4. الـ Scan Endpoint
+# 5. الـ Scan Endpoint
 # =========================================================
 @app.post("/scan")
 async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
@@ -123,21 +134,20 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         with open(temp_filename, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # ب) إرسال الصورة للموديل
+        # ب) استدعاء الموديل (باستخدام الدالة الذكية)
         print("🤖 Analyzing Image...")
+        hf_client = get_model_client()
         
-        # استخدام api_name="/predict"
         result = hf_client.predict(
             image=handle_file(temp_filename),
             api_name="/predict" 
         )
         
-        # ج) استخراج النتيجة (التشخيص)
+        # ج) استخراج النتيجة
         predicted_diagnosis = str(result)
         confidence = 0.95 
 
         try:
-            # محاولة استخراج الليبل لو النتيجة JSON
             if isinstance(result, dict) and 'label' in result:
                 predicted_diagnosis = result['label']
             elif isinstance(result, str) and "{'label':" in result:
@@ -148,23 +158,22 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
             
         print(f"✅ Diagnosis Detected: {predicted_diagnosis}")
 
-        # د) جلب التقرير الطبي المناسب
+        # د) جلب التقرير الطبي
         report_data = MEDICAL_REPORT_DATA.get(predicted_diagnosis, {
             "assessment": "Analysis completed. Diagnosis not specifically listed.",
             "key_features": [],
             "recommendations": ["Consult a doctor for further checkup."]
         })
 
-        # هـ) رفع الصورة لـ Supabase (البوكت الجديد)
+        # هـ) رفع الصورة لـ Supabase
         BUCKET_NAME = "skin-diseases"
-        
         print(f"☁️ Uploading Image to {BUCKET_NAME}...")
+        
         with open(temp_filename, "rb") as f:
             file_content = f.read()
         
         file_path = f"{user_id}/{file.filename}"
         
-        # الرفع
         supabase.storage.from_(BUCKET_NAME).upload(file_path, file_content, {"upsert": "true"})
         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
 
@@ -180,10 +189,9 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         
         supabase.table("scan_history").insert(data).execute()
 
-        # ز) تنظيف الملف المؤقت
+        # ز) تنظيف
         os.remove(temp_filename)
 
-        # الرد النهائي
         return {
             "status": "success",
             "diagnosis": predicted_diagnosis,
@@ -197,14 +205,14 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         return {"status": "error", "message": str(e)}
 
 # =========================================================
-# 5. إدارة البروفايل (Profile Management) - ✅ تم التحديث
+# 6. إدارة البروفايل (Profile Management) - كاملة وشاملة
 # =========================================================
 class ProfileUpdate(BaseModel):
     user_id: str
     full_name: Optional[str] = None
     username: Optional[str] = None
     website: Optional[str] = None
-    # ✅ الحقول الجديدة لدعم التعديلات الطبية والشخصية
+    # الحقول الجديدة
     age: Optional[int] = None
     gender: Optional[str] = None
     skin_type: Optional[str] = None
@@ -215,7 +223,6 @@ class ProfileUpdate(BaseModel):
 @app.get("/profile/{user_id}")
 def get_profile(user_id: str):
     try:
-        # select("*") ستجلب جميع الحقول الجديدة تلقائياً
         response = supabase.table("profiles").select("*").eq("id", user_id).execute()
         if not response.data:
             return {"status": "error", "message": "Profile not found"}
@@ -226,8 +233,7 @@ def get_profile(user_id: str):
 @app.put("/profile/update")
 def update_profile(profile: ProfileUpdate):
     try:
-        # ✅ تصفية البيانات: نأخذ فقط القيم التي تم إرسالها (ليست None)
-        # هذا يمنع مسح البيانات القديمة إذا لم يرسلها المستخدم
+        # تصفية البيانات (إرسال القيم الموجودة فقط)
         data_to_update = {k: v for k, v in profile.dict().items() if v is not None and k != "user_id"}
         
         if not data_to_update:
@@ -241,17 +247,15 @@ def update_profile(profile: ProfileUpdate):
         return {"status": "error", "message": str(e)}
 
 # =========================================================
-# 6. جلب الهيستوري (History)
+# 7. جلب الهيستوري (History)
 # =========================================================
 @app.get("/history/{user_id}")
 def get_user_history(user_id: str):
     try:
-        # ترتيب النتائج من الأحدث للأقدم
         response = supabase.table("scan_history").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
         
         final_data = []
         for item in response.data:
-            # تحويل النص لـ JSON في حالة medical_advice
             if item.get("medical_advice"):
                 try:
                     item["medical_advice"] = json.loads(item["medical_advice"])
