@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from gradio_client import Client as GradioClient, handle_file
 from pydantic import BaseModel
+from typing import Optional  # ✅ تمت إضافتها للتعامل مع الحقول الاختيارية
 import shutil
 import os
 import json
@@ -155,7 +156,7 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         })
 
         # هـ) رفع الصورة لـ Supabase (البوكت الجديد)
-        BUCKET_NAME = "skin-diseases"  # ✅ الاسم الجديد الذي أنشأته
+        BUCKET_NAME = "skin-diseases"
         
         print(f"☁️ Uploading Image to {BUCKET_NAME}...")
         with open(temp_filename, "rb") as f:
@@ -163,16 +164,16 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         
         file_path = f"{user_id}/{file.filename}"
         
-        # الرفع (service_role key في .env سيسمح بذلك حتى مع القيود)
+        # الرفع
         supabase.storage.from_(BUCKET_NAME).upload(file_path, file_content, {"upsert": "true"})
         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
 
-        # و) حفظ البيانات في الهيستوري (باستخدام العمود الجديد diagnosis)
+        # و) حفظ البيانات في الهيستوري
         print("💾 Saving to History...")
         data = {
             "user_id": user_id,
             "image_url": public_url,
-            "diagnosis": predicted_diagnosis, # ✅ العمود الجديد في الداتابيز
+            "diagnosis": predicted_diagnosis,
             "confidence": float(confidence),
             "medical_advice": json.dumps(report_data) 
         }
@@ -191,23 +192,30 @@ async def scan_face(user_id: str = Form(...), file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        # تنظيف في حالة الخطأ
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
         return {"status": "error", "message": str(e)}
 
 # =========================================================
-# 5. إدارة البروفايل (Profile Management)
+# 5. إدارة البروفايل (Profile Management) - ✅ تم التحديث
 # =========================================================
 class ProfileUpdate(BaseModel):
     user_id: str
-    full_name: str = None
-    username: str = None
-    website: str = None
+    full_name: Optional[str] = None
+    username: Optional[str] = None
+    website: Optional[str] = None
+    # ✅ الحقول الجديدة لدعم التعديلات الطبية والشخصية
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    skin_type: Optional[str] = None
+    role: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None 
 
 @app.get("/profile/{user_id}")
 def get_profile(user_id: str):
     try:
+        # select("*") ستجلب جميع الحقول الجديدة تلقائياً
         response = supabase.table("profiles").select("*").eq("id", user_id).execute()
         if not response.data:
             return {"status": "error", "message": "Profile not found"}
@@ -218,13 +226,14 @@ def get_profile(user_id: str):
 @app.put("/profile/update")
 def update_profile(profile: ProfileUpdate):
     try:
-        data_to_update = {}
-        if profile.full_name: data_to_update["full_name"] = profile.full_name
-        if profile.username: data_to_update["username"] = profile.username
-        if profile.website: data_to_update["website"] = profile.website
+        # ✅ تصفية البيانات: نأخذ فقط القيم التي تم إرسالها (ليست None)
+        # هذا يمنع مسح البيانات القديمة إذا لم يرسلها المستخدم
+        data_to_update = {k: v for k, v in profile.dict().items() if v is not None and k != "user_id"}
         
         if not data_to_update:
             return {"status": "error", "message": "No data to update"}
+
+        print(f"🔄 Updating Profile for {profile.user_id}: {data_to_update}")
 
         response = supabase.table("profiles").update(data_to_update).eq("id", profile.user_id).execute()
         return {"status": "success", "data": response.data}
@@ -253,3 +262,4 @@ def get_user_history(user_id: str):
         return {"status": "success", "data": final_data}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
