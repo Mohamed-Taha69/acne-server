@@ -1,7 +1,9 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 requests
 supabase
 python-dotenv
-gradio_client
+gradio-client
+pydantic
+pydantic-settings
