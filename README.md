@@ -1,6 +1,6 @@
 # DermaCheck Server
 
-Acne Server is a backend API designed to support acne-related applications, such as skincare apps or dermatology platforms. Built entirely in Python, this server offers robust endpoints for managing user data, acne tracking, and recommending skincare routines. The project is ideal for developers seeking a reliable foundation for health-tech solutions centered around skin health.
+DermaCheck Server is a backend API designed to support acne-related applications, such as skincare apps or dermatology platforms. Built entirely in Python, this server offers robust endpoints for managing user data, acne tracking, and recommending skincare routines. The project is ideal for developers seeking a reliable foundation for health-tech solutions centered around skin health.
 
 ## Features
 
