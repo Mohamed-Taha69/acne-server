@@ -48,7 +48,7 @@ def get_model_client():
     # لو الاتصال غير موجود، قم بإنشائه (يحدث مرة واحدة فقط)
     if _model_client_instance is None:
         print("🔌 Connecting to Hugging Face Model (First Time)...")
-        _model_client_instance = GradioClient("m-taha6/monkeypox")
+        _model_client_instance = GradioClient("m-taha6/monkeypox-Backup")
         print("✅ Connected Successfully to Hugging Face!")
     
     return _model_client_instance
